@@ -1,5 +1,5 @@
 {
-  "name": "@flashliquidity-core",
+  "name": "@flashliquidity/flashliquidity-core",
   "description": "🎛 Core contracts for the FlashLiquidity protocol",
   "version": "1.0.0",
   "homepage": "https://flashliquidity.finance",
