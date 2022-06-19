@@ -16,4 +16,7 @@ interface IFlashLiquidityFactory {
 
     function setFeeTo(address) external;
     function setFeeToSetter(address) external;
+
+    function setFlashbot(address pair, address _flashBot) external;
+    function setFlashbotSetter(address) external;
 }

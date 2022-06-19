@@ -8,7 +8,7 @@ import "../interfaces/IFlashLiquidityERC20.sol";
 import "../interfaces/IFlashLiquidityPair.sol";
 import "../interfaces/IFlashLiquidityFactory.sol";
 import "../../node_modules/@openzeppelin/contracts/math/SafeMath.sol";
-import "./Fliq.sol";
+import "./FliqToken.sol";
 
 library SafeERC20 {
     function safeSymbol(IERC20 token) internal view returns(string memory) {
@@ -96,21 +96,13 @@ contract Ownable is OwnableData {
     }
 }
 
-interface IFlashBotSetter {
-    function setFlashbot(address pair, address _flashBot) external;
-    function setFlashbotSetter(address _flashbotSetter) external;
-}
-
-interface IFlashBotPair {
-    function flashbot() external view returns (address);
-}
-
 contract Incentivizer is Ownable {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
     address public immutable factory;
-    address public immutable fliqWethStaking;
+    address public immutable treasury;
+    address public immutable fliqFarm;
     address private immutable fliq;
     address private immutable weth;
 
@@ -129,22 +121,16 @@ contract Incentivizer is Ownable {
 
     constructor(
         address _factory,
-        address _fliqWethStaking,
+        address _treasury,
+        address _fliqFarm,
         address _fliq,
         address _weth
     ) public {
         factory = _factory;
-        fliqWethStaking = _fliqWethStaking;
+        treasury = _treasury;
+        fliqFarm = _fliqFarm;
         fliq = _fliq;
         weth = _weth;
-    }
-
-    function setFlashbotSetter(address _flashbotSetter) external onlyOwner {
-        IFlashBotSetter(factory).setFlashbotSetter(_flashbotSetter);
-    }
-
-    function setFlashbot(address _pair, address _flashbot) external onlyOwner {
-        IFlashBotSetter(factory).setFlashbot(_pair, _flashbot);
     }
 
     function bridgeFor(address token) public view returns (address bridge) {
@@ -166,19 +152,23 @@ contract Incentivizer is Ownable {
         emit LogBridgeSet(token, bridge);
     }
 
-    function convert(address token0, address token1) external onlyOwner {
+    function convert(address token0, address token1) external {
+        require(msg.sender == treasury, "ONLY TREASURY");
         _convert(token0, token1);
+        IFlashLiquidityFactory(factory).setFlashbotSetter(treasury);
     }
 
     function convertMultiple(
         address[] calldata token0,
         address[] calldata token1
-    ) external onlyOwner {
+    ) external {
+        require(msg.sender == treasury, "ONLY TREASURY");
         // TODO: This can be optimized a fair bit, but this is safer and simpler for now
         uint256 len = token0.length;
         for (uint256 i = 0; i < len; i++) {
             _convert(token0[i], token1[i]);
         }
+        IFlashLiquidityFactory(factory).setFlashbotSetter(treasury);
     }
 
     function _convert(address token0, address token1) internal {
@@ -286,32 +276,33 @@ contract Incentivizer is Ownable {
         uint256 amountIn,
         address to
     ) internal returns (uint256 amountOut) {
-        IFlashLiquidityPair pair = IFlashLiquidityPair(
-            IFlashLiquidityFactory(factory).getPair(fromToken, toToken)
-        );
+        IFlashLiquidityPair pair = IFlashLiquidityPair(IFlashLiquidityFactory(factory).getPair(fromToken, toToken));
         require(address(pair) != address(0), "Incentivizer: Cannot convert");
         
-        address botAddr = IFlashBotPair(address(pair)).flashbot();
         (uint256 reserve0, uint256 reserve1, ) = pair.getReserves();
         uint256 amountInWithFee = amountIn.mul(997);
+        address _flashbot = pair.flashbot();
+        if(_flashbot != address(0)) {
+            IFlashLiquidityFactory(factory).setFlashbot(address(pair), address(this));            
+        }
         if (fromToken == pair.token0()) {
             amountOut =
                 amountInWithFee.mul(reserve1) /
                 reserve0.mul(1000).add(amountInWithFee);
             IERC20(fromToken).safeTransfer(address(pair), amountIn);
-            IFlashBotSetter(factory).setFlashbot(address(pair), address(this));
             pair.swap(0, amountOut, to, new bytes(0));
-            IFlashBotSetter(factory).setFlashbot(address(pair), botAddr);
             // TODO: Add maximum slippage?
         } else {
             amountOut =
                 amountInWithFee.mul(reserve0) /
                 reserve1.mul(1000).add(amountInWithFee);
             IERC20(fromToken).safeTransfer(address(pair), amountIn);
-            IFlashBotSetter(factory).setFlashbot(address(pair), address(this));
             pair.swap(amountOut, 0, to, new bytes(0));
-            IFlashBotSetter(factory).setFlashbot(address(pair), botAddr);
             // TODO: Add maximum slippage?
+        }
+
+        if(_flashbot != address(0)) {
+            IFlashLiquidityFactory(factory).setFlashbot(address(pair), _flashbot);            
         }
     }
 
@@ -319,6 +310,6 @@ contract Incentivizer is Ownable {
         internal
         returns (uint256 amountOut)
     {
-        amountOut = _swap(token, fliq, amountIn, fliqWethStaking);
+        amountOut = _swap(token, fliq, amountIn, fliqFarm);
     }
 }

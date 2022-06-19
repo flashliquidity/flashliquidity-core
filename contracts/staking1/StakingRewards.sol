@@ -181,6 +181,32 @@ interface IStakingRewards {
     function exit() external;
 }
 
+interface IUniswapV2ERC20 {
+    function permit(address owner, address spender, uint value, uint deadline, uint8 v, bytes32 r, bytes32 s) external;
+}
+
+interface IWETH {
+    function deposit() external payable;
+    function transfer(address to, uint value) external returns (bool);
+    function withdraw(uint) external;
+}
+
+interface IFlashBorrower {
+    /// @notice The flashloan callback. `amount` + `fee` needs to repayed to msg.sender before this call returns.
+    /// @param sender The address of the invoker of this flashloan.
+    /// @param token The address of the token that is loaned.
+    /// @param amount of the `token` that is loaned.
+    /// @param fee The fee that needs to be paid on top for this loan. Needs to be the same as `token`.
+    /// @param data Additional data that was passed to the flashloan function.
+    function onFlashLoan(
+        address sender,
+        address token,
+        uint256 amount,
+        uint256 fee,
+        bytes calldata data
+    ) external;
+}
+
 contract StakingRewards is ReentrancyGuard, IStakingRewards {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -191,13 +217,16 @@ contract StakingRewards is ReentrancyGuard, IStakingRewards {
     IERC20 public stakingToken;
     address public rewardsFactory;
     address public WETH;
+    address public freeFlashLoanSetter;
     uint256 public rewardRate = 1e14;
     uint256 public lastUpdateTime;
     uint256 public rewardPerTokenStored;
     uint256 public rewardsPending;
+    uint256 public constant flashLoanFee = 5; // 0.05%
 
     mapping(address => uint256) public userRewardPerTokenPaid;
     mapping(address => uint256) public rewards;
+    mapping(address => bool) public isFreeFlashLoan;
 
     uint256 private _totalSupply;
     mapping(address => uint256) private _balances;
@@ -207,11 +236,13 @@ contract StakingRewards is ReentrancyGuard, IStakingRewards {
     constructor(
         address _rewardsToken,
         address _stakingToken,
-        address _WETH
+        address _WETH,
+        address _freeFlashLoanSetter
     ) public {
         rewardsToken = IERC20(_rewardsToken);
         stakingToken = IERC20(_stakingToken);
         WETH = _WETH;
+        freeFlashLoanSetter = _freeFlashLoanSetter;
         rewardsFactory = msg.sender;
     }
     
@@ -231,30 +262,39 @@ contract StakingRewards is ReentrancyGuard, IStakingRewards {
         if (_totalSupply == 0) {
             return rewardPerTokenStored;
         }
-        return
-            rewardPerTokenStored.add(
-                block.timestamp.sub(lastUpdateTime).mul(rewardRate).mul(1e18).div(_totalSupply)
-            );
+        return rewardPerTokenStored
+                    .add(block.timestamp.sub(lastUpdateTime)
+                                        .mul(rewardRate)
+                                        .mul(1e18)
+                                        .div(_totalSupply));
     }
 
     function earned(address account) public view returns (uint256) {
-        return _balances[account].mul(rewardPerToken().sub(userRewardPerTokenPaid[account])).div(1e18).add(rewards[account]);
+        return _balances[account]
+                    .mul(rewardPerToken().sub(userRewardPerTokenPaid[account]))
+                    .div(1e18)
+                    .add(rewards[account]);
     }
 
     function earnedRewardToken(address _account) public view returns(uint256) {
-        if(address(rewardsToken) == WETH) {
-            return earned(_account)
-                        .mul(address(this).balance)
-                        .div(rewardsPending.add((block.timestamp.sub(lastUpdateTime)).mul(rewardRate)));
-        }
-        else {
-            return earned(_account)
-                        .mul(rewardsToken.balanceOf(address(this)))
-                        .div(rewardsPending.add((block.timestamp - lastUpdateTime).mul(rewardRate)));
-        }
+        return earned(_account)
+                    .mul(rewardsToken.balanceOf(address(this)))
+                    .div(rewardsPending
+                            .add((block.timestamp - lastUpdateTime).mul(rewardRate)));  
     }
 
     /* ========== MUTATIVE FUNCTIONS ========== */
+
+    function setFreeFlashLoanSetter(address _freeFlashLoanSetter) external {
+        require(msg.sender == freeFlashLoanSetter, "Forbidden");
+        freeFlashLoanSetter = _freeFlashLoanSetter;
+    }
+
+    function setFreeFlashLoan(address _flashloaner, bool _isFree) external {
+        require(msg.sender == freeFlashLoanSetter, "Forbidden");
+        isFreeFlashLoan[_flashloaner] = _isFree;
+        emit FreeFlashloanerChanged(_flashloaner, _isFree);
+    }
 
     function stakeWithPermit(uint256 amount, uint deadline, uint8 v, bytes32 r, bytes32 s) external nonReentrant updateReward(msg.sender) {
         require(amount > 0, "Cannot stake 0");
@@ -286,18 +326,13 @@ contract StakingRewards is ReentrancyGuard, IStakingRewards {
 
     function getReward() public nonReentrant updateReward(msg.sender) {
         uint256 reward = rewards[msg.sender];
-        uint256 profitShare;
-        if(address(rewardsToken) == WETH) {
-            profitShare = reward.mul(address(this).balance).div(rewardsPending);
-        }
-        else{
-            profitShare = reward.mul(rewardsToken.balanceOf(address(this))).div(rewardsPending);    
-        }
-        
+        uint256 profitShare = reward.mul(rewardsToken.balanceOf(address(this)))
+                                    .div(rewardsPending);    
         if (profitShare > 0) {
             rewards[msg.sender] = 0;
             rewardsPending = rewardsPending.sub(reward);
             if (address(rewardsToken) == WETH) {
+                IWETH(WETH).withdraw(profitShare);
                 msg.sender.transfer(profitShare);
             }
             else {
@@ -311,6 +346,38 @@ contract StakingRewards is ReentrancyGuard, IStakingRewards {
         withdraw(_balances[msg.sender]);
         getReward();
     }
+
+    function flashLoan(
+        IFlashBorrower borrower,
+        address receiver,
+        uint256 amount,
+        bytes memory data
+    ) public {
+        require(amount > 1e9, "flashLoan: amount too low");
+        uint256 fee = amount.mul(flashLoanFee).div(1e4);
+        uint256 minBalanceAfter = rewardsToken.balanceOf(address(this));
+        rewardsToken.safeTransfer(receiver, amount);
+        borrower.onFlashLoan(msg.sender, address(rewardsToken), amount, fee, data);
+        if(!isFreeFlashLoan[msg.sender]) {
+            minBalanceAfter = minBalanceAfter.add(fee);
+        }
+
+        require(rewardsToken.balanceOf(address(this)) >= minBalanceAfter, "flashLoan: Wrong amount");
+        emit LogFlashLoan(address(borrower), receiver, address(rewardsToken), amount, fee);
+    }
+
+    /* ========== EVENTS ========== */
+    event Staked(address indexed user, uint256 amount);
+    event Withdrawn(address indexed user, uint256 amount);
+    event RewardPaid(address indexed user, uint256 reward);
+    event LogFlashLoan(
+        address indexed borrower, 
+        address indexed receiver,
+        address indexed rewardsToken,
+        uint256 amount, 
+        uint256 fee
+    );
+    event FreeFlashloanerChanged(address indexed flashloaner, bool indexed free);
 
     /* ========== MODIFIERS ========== */
 
@@ -327,13 +394,4 @@ contract StakingRewards is ReentrancyGuard, IStakingRewards {
         }
         _;
     }
-
-    /* ========== EVENTS ========== */
-    event Staked(address indexed user, uint256 amount);
-    event Withdrawn(address indexed user, uint256 amount);
-    event RewardPaid(address indexed user, uint256 reward);
-}
-
-interface IUniswapV2ERC20 {
-    function permit(address owner, address spender, uint value, uint deadline, uint8 v, bytes32 r, bytes32 s) external;
 }
