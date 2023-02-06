@@ -4,14 +4,10 @@ FlashLiquidity core contracts are the fork of [Uniswap V2](https://github.com/Un
 
 In-depth documentation on Uniswap V2 is available at [uniswap.org](https://uniswap.org/docs).
 
-The built contract artifacts can be browsed via [unpkg.com](https://unpkg.com/browse/@uniswap/v2-core@latest/).
-
 # Addresses and Verified Source Code:
 
-- FLIQ token: https://polygonscan.com/address/0x03079F967A37cCAc6eb01d5dcC98FC45E6b57517
-- FlashLiquidity Router: https://polygonscan.com/address/0x552bE393Ef90A8f95836942f731359cf609badb7
-- FlashLiquidity Factory: https://polygonscan.com/address/0x59c2997A3D73F32590D9D49dE63B860bB1477d3c
-- Pair Contract: https://polygonscan.com/address/0x2572A50CC8f68AdbA0cd20315Aa44107A2a02ddD
+- FlashLiquidity Factory: https://polygonscan.com/address/0x6e553d5f028bD747a27E138FA3109570081A23aE
+- Pair Contract: https://polygonscan.com/address/0x0C9580eC848bd48EBfCB85A4aE1f0354377315fD
 
 # Local Development
 

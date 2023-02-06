@@ -7,7 +7,7 @@ contract FlashLiquidityERC20 is IFlashLiquidityERC20 {
     using SafeMath for uint;
 
     string public constant name = 'FlashLiquidity';
-    string public constant symbol = 'FLASH';
+    string public constant symbol = 'FLASH-LP';
     uint8 public constant decimals = 18;
     uint  public totalSupply;
     mapping(address => uint) public balanceOf;
@@ -79,7 +79,7 @@ contract FlashLiquidityERC20 is IFlashLiquidityERC20 {
     }
 
     function permit(address owner, address spender, uint value, uint deadline, uint8 v, bytes32 r, bytes32 s) external {
-        require(deadline >= block.timestamp, 'FlashLiquidity: EXPIRED');
+        require(deadline >= block.timestamp, 'EXPIRED');
         bytes32 digest = keccak256(
             abi.encodePacked(
                 '\x19\x01',
@@ -88,7 +88,7 @@ contract FlashLiquidityERC20 is IFlashLiquidityERC20 {
             )
         );
         address recoveredAddress = ecrecover(digest, v, r, s);
-        require(recoveredAddress != address(0) && recoveredAddress == owner, 'FlashLiquidity: INVALID_SIGNATURE');
+        require(recoveredAddress != address(0) && recoveredAddress == owner, 'INVALID_SIGNATURE');
         _approve(owner, spender, value);
     }
 }

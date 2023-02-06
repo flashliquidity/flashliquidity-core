@@ -7,7 +7,7 @@ interface IFlashLiquidityFactory {
 
     function feeTo() external view returns (address);
     function feeToSetter() external view returns (address);
-    function flashbotSetter() external view returns (address);
+    function pairManagerSetter() external view returns (address);
 
     function getPair(address tokenA, address tokenB) external view returns (address pair);
     function allPairs(uint) external view returns (address pair);
@@ -18,6 +18,6 @@ interface IFlashLiquidityFactory {
     function setFeeTo(address) external;
     function setFeeToSetter(address) external;
 
-    function setFlashbot(address pair, address _flashBot) external;
-    function setFlashbotSetter(address) external;
+    function setPairManager(address pair, address _manager) external;
+    function setPairManagerSetter(address) external;
 }

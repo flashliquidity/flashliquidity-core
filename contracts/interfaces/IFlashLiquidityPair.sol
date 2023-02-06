@@ -12,7 +12,7 @@ interface IFlashLiquidityPair {
     function totalSupply() external view returns (uint);
     function balanceOf(address owner) external view returns (uint);
     function allowance(address owner, address spender) external view returns (uint);
-    function flashbot() external view returns (address);
+    function manager() external view returns (address);
     
     function approve(address spender, uint value) external returns (bool);
     function transfer(address to, uint value) external returns (bool);
@@ -52,5 +52,5 @@ interface IFlashLiquidityPair {
     function sync() external;
 
     function initialize(address, address) external;
-    function setFlashbot(address) external;
+    function setManager(address) external;
 }
